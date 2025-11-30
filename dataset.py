@@ -41,6 +41,9 @@ class CamLocDataset(Dataset):
                  num_clusters=None,
                  cluster_idx=None,
                  feat_name='features.npy',
+                 override_rgb_dir=None,
+                 override_pose_dir=None,
+                 override_feat_path=None,
                  ):
         """Constructor.
 
@@ -101,15 +104,28 @@ class CamLocDataset(Dataset):
             # pre-generated eye coordinates cannot be augmented
             _logger.warning("WARNING: Check your augmentation settings. Camera coordinates will not be augmented.")
 
-        # Setup data paths.
+                # Setup data paths.
         root_dir = Path(root_dir)
 
-        # Main folders.
-        rgb_dir = root_dir / 'rgb'
-        pose_dir = root_dir / 'poses'
-        calibration_dir = root_dir / 'calibration'
-        self.global_feats= np.load(root_dir / feat_name)
-        self.global_feat_dim= self.global_feats.shape[1]
+        # Main folders, with optional overrides.
+        if override_rgb_dir is not None:
+            rgb_dir = Path(override_rgb_dir)
+        else:
+            rgb_dir = root_dir / 'rgb'
+
+        if override_pose_dir is not None:
+            pose_dir = Path(override_pose_dir)
+        else:
+            pose_dir = root_dir / 'poses'
+
+        # Global features: either explicit path or root_dir / feat_name
+        if override_feat_path is not None:
+            feat_path = Path(override_feat_path)
+        else:
+            feat_path = root_dir / feat_name
+
+        self.global_feats = np.load(feat_path)
+        self.global_feat_dim = self.global_feats.shape[1]
 
         # Optional folders. Unused in ACE.
         if self.eye:
@@ -126,7 +142,7 @@ class CamLocDataset(Dataset):
         self.pose_values = np.array([np.loadtxt(pose_file) for pose_file in sorted(pose_dir.iterdir())])
 
         # Load camera calibrations. One focal length per image.
-        self.calibration_files = sorted(calibration_dir.iterdir())
+        # self.calibration_files = sorted(calibration_dir.iterdir())
 
         if self.init or self.eye:
             # Load GT scene coordinates.
@@ -137,8 +153,8 @@ class CamLocDataset(Dataset):
         if len(self.rgb_files) != len(self.pose_values):
             raise RuntimeError('RGB file count does not match pose file count!')
 
-        if len(self.rgb_files) != len(self.calibration_files):
-            raise RuntimeError('RGB file count does not match calibration file count!')
+        # if len(self.rgb_files) != len(self.calibration_files):
+        #     raise RuntimeError('RGB file count does not match calibration file count!')
 
         if self.coord_files and len(self.rgb_files) != len(self.coord_files):
             raise RuntimeError('RGB file count does not match coordinate file count!')
@@ -365,18 +381,20 @@ class CamLocDataset(Dataset):
         image = self._load_image(idx)
 
         # Load intrinsics.
-        k = np.loadtxt(self.calibration_files[idx])
-        if k.size == 1:
-            focal_length = float(k)
-            centre_point = None
-        elif k.shape == (3, 3):
-            k = k.tolist()
-            focal_length = [k[0][0], k[1][1]]
-            centre_point = [k[0][2], k[1][2]]
-        else: 
-            raise Exception("Calibration file must contain either a 3x3 camera \
-                intrinsics matrix or a single float giving the focal length \
-                of the camera.")
+        focal_length = float(525.0)
+        centre_point = None
+        # k = np.loadtxt(self.calibration_files[idx])
+        # if k.size == 1:
+        #     focal_length = float(k)
+        #     centre_point = None
+        # elif k.shape == (3, 3):
+        #     k = k.tolist()
+        #     focal_length = [k[0][0], k[1][1]]
+        #     centre_point = [k[0][2], k[1][2]]
+        # else: 
+        #     raise Exception("Calibration file must contain either a 3x3 camera \
+        #         intrinsics matrix or a single float giving the focal length \
+        #         of the camera.")
 
         # The image will be scaled to image_height, adjust focal length as well.
         f_scale_factor = image_height / image.shape[0]

@@ -102,7 +102,9 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
 
-    device = torch.device("cuda")
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    print(f"Using device: {device}")
     num_workers = 6
 
     scene_path = Path(opt.scene)
@@ -210,8 +212,9 @@ if __name__ == '__main__':
             global_feat = global_feat.to(device, non_blocking=True)
 
             # Predict scene coordinates.
-            with autocast(enabled=True):
-                scene_coordinates_B3HW = network(image_B1HW,global_feat)
+            with autocast(enabled=device.type == "cuda"):
+                scene_coordinates_B3HW = network(image_B1HW, global_feat)
+
 
             # We need them on the CPU to run RANSAC.
             scene_coordinates_B3HW = scene_coordinates_B3HW.float().cpu()
