@@ -80,7 +80,14 @@ def run_eval_for_split(
     )
     _logger.info(f"Test images found for {scene_name}_{distortion}: {len(testset)}")
 
-    test_loader = DataLoader(testset, shuffle=False, num_workers=2)
+    test_loader = DataLoader(
+        testset,
+        batch_size=64, # NEEDS TO BE ADJUSTED: DEPENDS ON GPU VRAM
+        shuffle=False,
+        num_workers=8, # NEEDS TO BE ADJUSTED: USUALLY HALF OF CPU CORES
+        pin_memory=True,
+        persistent_workers=True,
+    )
 
     # Build network from state dicts
     network = Regressor.create_from_split_state_dict(encoder_state_dict, head_state_dict)
