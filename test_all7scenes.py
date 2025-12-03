@@ -16,6 +16,17 @@ import dsacstar
 from ace_network import Regressor
 from dataset import CamLocDataset
 
+try:
+    from tqdm.auto import tqdm
+except ImportError:
+    class tqdm:  # minimal dummy fallback
+        def __init__(self, total=None, desc=None, unit=None):
+            self.total = total
+        def update(self, n=1):
+            pass
+        def close(self):
+            pass
+
 logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
 
@@ -69,12 +80,26 @@ def run_eval_for_split(
     )
     _logger.info(f"Test images found for {scene_name}_{distortion}: {len(testset)}")
 
-    test_loader = DataLoader(testset, shuffle=False, num_workers=1)
+    test_loader = DataLoader(testset, shuffle=False, num_workers=2)
 
     # Build network from state dicts
     network = Regressor.create_from_split_state_dict(encoder_state_dict, head_state_dict)
     network = network.to(device)
     network.eval()
+
+    # Metrics of interest.
+    avg_batch_time = 0
+    num_batches = 0
+
+    # Keep track of rotation and translation errors for calculation of the median error.
+    rErrs = []
+    tErrs = []
+
+    # Percentage of frames predicted within certain thresholds from their GT pose.
+    pct10_5 = 0
+    pct5 = 0
+    pct2 = 0
+    pct1 = 0
 
     # RANSAC params (as before)
     hypotheses = 64
@@ -85,8 +110,17 @@ def run_eval_for_split(
     total_frames = 0
     start_time = time.time()
 
+    progress_bar = tqdm(
+        total=len(testset),
+        desc=f"{scene_name}_{distortion}",
+        unit="img",
+    )
+
     with torch.no_grad():
         for image_B1HW, _, gt_pose_B44, _, intrinsics_B33, _, _, filenames, global_feat, idx in test_loader:
+            regression_start_time = time.time()
+            batch_size = image_B1HW.shape[0]
+
             image_B1HW = image_B1HW.to(device, non_blocking=True)
             global_feat = global_feat.to(device, non_blocking=True)
 
@@ -95,6 +129,9 @@ def run_eval_for_split(
                 scene_coordinates_B3HW = network(image_B1HW, global_feat)
 
             scene_coordinates_B3HW = scene_coordinates_B3HW.float().cpu()
+
+            regression_time = time.time() - regression_start_time
+            regression_time_per_img = regression_time / batch_size
 
             for scene_coordinates_3HW, gt_pose_44, intrinsics_33, frame_path in zip(
                 scene_coordinates_B3HW, gt_pose_B44, intrinsics_B33, filenames
@@ -132,7 +169,7 @@ def run_eval_for_split(
                 )
 
                 # ----------------- Timing end -----------------
-                latency_ms = (time.time() - frame_t_start) * 1000.0
+                latency_ms = (time.time() - frame_t_start + regression_time_per_img) * 1000.0 
 
                 # ----------------- JSON per-frame record -----------------
                 frame_info = {
@@ -145,6 +182,42 @@ def run_eval_for_split(
                 }
                 json_results.append(frame_info)
                 # ---------------------------------------------------------
+                # Calculate translation error.
+                t_err = float(torch.norm(gt_pose_44[0:3, 3] - out_pose[0:3, 3]))
+
+                # Rotation error.
+                gt_R = gt_pose_44[0:3, 0:3].numpy()
+                out_R = out_pose[0:3, 0:3].numpy()
+
+                r_err = np.matmul(out_R, np.transpose(gt_R))
+                # Compute angle-axis representation.
+                r_err = cv2.Rodrigues(r_err)[0]
+                # Extract the angle.
+                r_err = np.linalg.norm(r_err) * 180 / math.pi
+
+                # _logger.info(f"Rotation Error: {r_err:.2f}deg, Translation Error: {t_err * 100:.1f}cm")
+
+                # Save the errors.
+                rErrs.append(r_err)
+                tErrs.append(t_err * 100)
+
+                # Check various thresholds.
+                if r_err < 5 and t_err < 0.1:  # 10cm/5deg
+                    pct10_5 += 1
+                if r_err < 5 and t_err < 0.05:  # 5cm/5deg
+                    pct5 += 1
+                if r_err < 2 and t_err < 0.02:  # 2cm/2deg
+                    pct2 += 1
+                if r_err < 1 and t_err < 0.01:  # 1cm/1deg
+                    pct1 += 1
+
+                progress_bar.update(1)
+
+
+            avg_batch_time += time.time() - regression_start_time
+            num_batches += 1
+
+    progress_bar.close()
 
     if total_frames == 0:
         _logger.warning(f"No frames evaluated for {scene_name}_{distortion}")
@@ -156,11 +229,36 @@ def run_eval_for_split(
         f"elapsed {elapsed:.1f}s (~{elapsed*1000/total_frames:.1f} ms/frame)"
     )
 
-    # You *could* write one summary line to global_log_file here if you like.
-    # For now, we'll just log total frames + avg time per frame:
-    global_log_file.write(
-        f"{scene_name},{distortion},{total_frames},avg_time_ms_per_frame={elapsed*1000/total_frames:.2f}\n"
-    )
+    # Compute median errors.
+    tErrs.sort()
+    rErrs.sort()
+    median_idx = total_frames // 2
+    median_rErr = rErrs[median_idx]
+    median_tErr = tErrs[median_idx]
+
+    # Compute average time.
+    avg_time = avg_batch_time / num_batches
+
+    # Compute final metrics.
+    pct10_5 = pct10_5 / total_frames * 100
+    pct5 = pct5 / total_frames * 100
+    pct2 = pct2 / total_frames * 100
+    pct1 = pct1 / total_frames * 100
+
+    _logger.info("===================================================")
+
+    _logger.info('Accuracy:')
+    _logger.info(f'\t10cm/5deg: {pct10_5:.1f}%')
+    _logger.info(f'\t5cm/5deg: {pct5:.1f}%')
+    _logger.info(f'\t2cm/2deg: {pct2:.1f}%')
+    _logger.info(f'\t1cm/1deg: {pct1:.1f}%')
+
+    _logger.info(f"Median Error: {median_rErr:.1f}deg, {median_tErr:.1f}cm")
+    _logger.info(f"Avg. processing time: {avg_time * 1000:4.1f}ms")
+
+    # Write to the global log file as well.
+    global_log_file.write(f"{scene_name}_{distortion},{median_rErr:.3f},{median_tErr:.3f},{avg_time:.3f}\n")
+
     global_log_file.flush()
 
 

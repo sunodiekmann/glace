@@ -94,7 +94,7 @@ int dsacstar_rgb_forward(
 	cv::Mat_<cv::Point2i> sampling = 
 		dsacstar::createSampling(imW, imH, subSampling, 0, 0);
 
-	std::cout << BLUETEXT("Sampling " << ransacHypotheses << " hypotheses.") << std::endl;
+	// std::cout << BLUETEXT("Sampling " << ransacHypotheses << " hypotheses.") << std::endl;
 	StopWatch stopW;
 
 	// sample RANSAC hypotheses
@@ -115,8 +115,8 @@ int dsacstar_rgb_forward(
 		imgPts,
 		objPts);
 
-	std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;	
-	std::cout << BLUETEXT("Calculating scores.") << std::endl;
+	// std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;	
+	// std::cout << BLUETEXT("Calculating scores.") << std::endl;
     
 	// compute reprojection error images
 	std::vector<cv::Mat_<float>> reproErrs(ransacHypotheses);
@@ -138,20 +138,20 @@ int dsacstar_rgb_forward(
     	inlierThreshold,
     	inlierAlpha);
 
-	std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;
-	std::cout << BLUETEXT("Drawing final hypothesis.") << std::endl;	
+	// std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;
+	// std::cout << BLUETEXT("Drawing final hypothesis.") << std::endl;	
 
 	// apply soft max to scores to get a distribution
 	std::vector<double> hypProbs = dsacstar::softMax(scores);
 	double hypEntropy = dsacstar::entropy(hypProbs); // measure distribution entropy
 	int hypIdx = dsacstar::draw(hypProbs, false); // select winning hypothesis
 
-	std::cout << "Soft inlier count: " << scores[hypIdx] << " (Selection Probability: " << (int) (hypProbs[hypIdx]*100) << "%)" << std::endl; 
-	std::cout << "Entropy of hypothesis distribution: " << hypEntropy << std::endl;
+	// std::cout << "Soft inlier count: " << scores[hypIdx] << " (Selection Probability: " << (int) (hypProbs[hypIdx]*100) << "%)" << std::endl; 
+	// std::cout << "Entropy of hypothesis distribution: " << hypEntropy << std::endl;
 
 
-	std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;
-	std::cout << BLUETEXT("Refining winning pose:") << std::endl;
+	// std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;
+	// std::cout << BLUETEXT("Refining winning pose:") << std::endl;
 
 	// refine selected hypothesis
 	cv::Mat_<int> inlierMap;
@@ -167,7 +167,7 @@ int dsacstar_rgb_forward(
 		hypotheses[hypIdx],
 		inlierMap);
 
-	std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;
+	// std::cout << "Done in " << stopW.stop() / 1000 << "s." << std::endl;
 
 	// write result back to PyTorch
 	dsacstar::trans_t estTrans = dsacstar::pose2trans(hypotheses[hypIdx]);
